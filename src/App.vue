@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { writeTextFile } from '@tauri-apps/plugin-fs';
+import { writeTextFile, exists, readTextFile, remove } from '@tauri-apps/plugin-fs';
 import { open } from '@tauri-apps/plugin-dialog';
 import { htmlToMarkdown, detectLineEnding, applyLineEnding } from './utils/markdown-converter';
 import type { Editor as TiptapEditor } from '@tiptap/vue-3';
@@ -25,6 +25,9 @@ import TableOfContents from './components/TableOfContents.vue';
 import KeyboardShortcutsModal from './components/KeyboardShortcutsModal.vue';
 import SettingsModal from './components/SettingsModal.vue';
 import WhatsNewModal from './components/WhatsNewModal.vue';
+import AiPanel from './components/ai/AiPanel.vue';
+import AiFirstRunTooltip from './components/ai/AiFirstRunTooltip.vue';
+import AiTmpRecoveryModal from './components/ai/AiTmpRecoveryModal.vue';
 import ToastNotification from './components/ToastNotification.vue';
 import FileConflictModal from './components/FileConflictModal.vue';
 
@@ -361,6 +364,12 @@ const {
     const fileName = filePath.split(/[/\\]/).pop() ?? filePath;
     addRecentFile(filePath, fileName);
   },
+  onAfterSave: (filePath: string, content: string) => {
+    // New file just got a path (Save / Save As on a fresh tab) — ensure
+    // the file watcher is registered so external edits (e.g., AI) are
+    // detected and trigger an editor reload.
+    watchFile(filePath, content);
+  },
   onPreSaveConflict: (filePath: string, diskContent: string, localMarkdown: string) => {
     const tab = findTabByFilePath(filePath);
     // Diff shows local (current editor) → disk so the user sees their changes vs external changes.
@@ -501,6 +510,138 @@ const showShortcutsModal = ref(false);
 
 // ============ Settings Modal ============
 const showSettingsModal = ref(false);
+
+// ============ AI Panel ============
+const aiPanelOpen = ref(false);
+
+function toggleAiPanel() {
+  aiPanelOpen.value = !aiPanelOpen.value;
+}
+
+function onAiApplyContent(content: string) {
+  // Reload-only — no auto-diff (revert flow already matches disk).
+  setEditorContent(content);
+  // Mark editor state as "saved" so the next file-watcher fire (we just
+  // wrote the file ourselves) does not pop a conflict modal that blocks
+  // subsequent Restore clicks.
+  const tab = activeTab.value;
+  if (tab && typeof tab === 'object' && 'originalMarkdown' in tab) {
+    (tab as { originalMarkdown: string | null; hasChanges: boolean }).originalMarkdown = content;
+    (tab as { originalMarkdown: string | null; hasChanges: boolean }).hasChanges = false;
+  }
+}
+
+function onAiShowDiff(_orig: string, candidate: string) {
+  // Write the candidate into the editor so the existing change-tracking
+  // machinery computes the diff vs the on-disk original, then surface
+  // the DiffPreview modal immediately.
+  setEditorContent(candidate);
+  nextTick(() => {
+    if (canShowDiff.value) openDiffPreview();
+  });
+}
+
+// Compute panel inputs from the active tab.
+const aiDocPath = computed(() => activeTab.value?.filePath ?? '');
+const aiDocContent = computed(() => getEditorContent() ?? '');
+// Re-evaluate selection on every render tick so the AI panel sees the
+// current editor/code-view selection.
+const aiSelectionTick = ref(0);
+// Editor selection cannot change because of clicks/keys inside the AI panel.
+// Bumping the tick on every mouseup forces an AiPanel re-render between
+// mouseup and click, which Chromium uses as the trigger for native <details>
+// toggle — the re-render races the toggle and the chip refuses to open.
+// Gate so the tick only fires when the event happens outside the AI panel.
+const _bumpSelectionTick = (e?: Event) => {
+  const target = e?.target as HTMLElement | null;
+  if (target?.closest && target.closest('.ai-panel')) return;
+  aiSelectionTick.value++;
+};
+if (typeof document !== 'undefined') {
+  document.addEventListener('selectionchange', _bumpSelectionTick);
+  document.addEventListener('keyup', _bumpSelectionTick);
+  document.addEventListener('mouseup', _bumpSelectionTick);
+}
+const aiSelectionRange = computed<{ start: number; end: number } | null>(() => {
+  aiSelectionTick.value;
+  if (codeView.value) {
+    const ta = codeEditorComponentRef.value?.textarea as HTMLTextAreaElement | undefined;
+    if (!ta) return null;
+    const { selectionStart, selectionEnd } = ta;
+    if (selectionStart === selectionEnd) return null;
+    return { start: selectionStart, end: selectionEnd };
+  }
+  const ed = editorInstance.value;
+  if (!ed) return null;
+  const { from, to } = ed.state.selection;
+  if (from === to) return null;
+  return { start: from, end: to };
+});
+
+// Extract the actual selected TEXT directly from the active editor — avoids
+// the buggy 'slice docMarkdown by range' approximation, since TipTap PM
+// positions do not map 1:1 to markdown char offsets, and code-view content
+// may diverge from htmlToMarkdown(visual).
+const aiSelectionText = computed<string>(() => {
+  aiSelectionTick.value;
+  if (codeView.value) {
+    const ta = codeEditorComponentRef.value?.textarea as HTMLTextAreaElement | undefined;
+    if (!ta) return '';
+    const { selectionStart, selectionEnd, value } = ta;
+    if (selectionStart === selectionEnd) return '';
+    return value.slice(selectionStart, selectionEnd);
+  }
+  const ed = editorInstance.value;
+  if (!ed) return '';
+  const { from, to } = ed.state.selection;
+  if (from === to) return '';
+  return ed.state.doc.textBetween(from, to, '\n\n', '\n');
+});
+const aiWorkDir = computed(() => {
+  const p = activeTab.value?.filePath;
+  if (!p) return '';
+  // Strip the filename to get the directory; works for both / and \ separators.
+  const idx = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
+  return idx >= 0 ? p.slice(0, idx) : p;
+});
+
+// ============ AI Tmp Recovery ============
+const tmpRecovery = ref<{ tmpPath: string; content: string; modifiedAt: string } | null>(null);
+
+watch(() => activeTab.value?.filePath, async (path) => {
+  if (!path) { tmpRecovery.value = null; return; }
+  const tmpPath = `${path}.mermark-ai.tmp`;
+  try {
+    if (await exists(tmpPath)) {
+      const content = await readTextFile(tmpPath);
+      tmpRecovery.value = { tmpPath, content, modifiedAt: new Date().toISOString() };
+    } else {
+      tmpRecovery.value = null;
+    }
+  } catch {
+    tmpRecovery.value = null;
+  }
+});
+
+async function onTmpRestore() {
+  if (!tmpRecovery.value) return;
+  setEditorContent(tmpRecovery.value.content);
+  try { await remove(tmpRecovery.value.tmpPath); } catch { /* best-effort */ }
+  tmpRecovery.value = null;
+}
+
+async function onTmpDiscard() {
+  if (!tmpRecovery.value) return;
+  try { await remove(tmpRecovery.value.tmpPath); } catch { /* best-effort */ }
+  tmpRecovery.value = null;
+}
+
+function onTmpShowDiff() {
+  if (!tmpRecovery.value) return;
+  setEditorContent(tmpRecovery.value.content);
+  // Existing diff machinery compares vs originalMarkdown automatically.
+  tmpRecovery.value = null;
+}
 
 // ============ What's New Modal ============
 const showWhatsNewModal = ref(false);
@@ -1030,6 +1171,7 @@ onUnmounted(async () => {
       :can-show-diff="canShowDiff"
       :can-compare-tabs="canCompareTabs"
       :toc-active="showTocPanel"
+      :ai-active="aiPanelOpen"
       @new-file="newFile"
       @open-file="openFileWithCrossWindowDialog"
       @open-recent="openFileWithCrossWindowCheck"
@@ -1043,6 +1185,7 @@ onUnmounted(async () => {
       @show-shortcuts="showShortcutsModal = true"
       @show-settings="showSettingsModal = true"
       @toggle-toc="toggleTocPanel"
+      @toggle-ai="toggleAiPanel"
     />
 
     <!-- Main content area with optional left bar -->
@@ -1056,9 +1199,10 @@ onUnmounted(async () => {
         :can-show-diff="canShowDiff"
         :can-compare-tabs="canCompareTabs"
         :toc-active="showTocPanel"
+        :ai-active="aiPanelOpen"
         @new-file="newFile"
         @open-file="openFileWithCrossWindowDialog"
-      @open-recent="openFileWithCrossWindowCheck"
+        @open-recent="openFileWithCrossWindowCheck"
         @save-file="saveFile"
         @save-file-as="saveFileAs"
         @export-pdf="exportPdf"
@@ -1069,6 +1213,7 @@ onUnmounted(async () => {
         @show-shortcuts="showShortcutsModal = true"
         @show-settings="showSettingsModal = true"
         @toggle-toc="toggleTocPanel"
+        @toggle-ai="toggleAiPanel"
       />
 
       <!-- Editor area with optional TOC sidebar -->
@@ -1116,6 +1261,7 @@ onUnmounted(async () => {
       :can-show-diff="canShowDiff"
       :can-compare-tabs="canCompareTabs"
       :toc-active="showTocPanel"
+      :ai-active="aiPanelOpen"
       @new-file="newFile"
       @open-file="openFileWithCrossWindowDialog"
       @open-recent="openFileWithCrossWindowCheck"
@@ -1129,6 +1275,7 @@ onUnmounted(async () => {
       @show-shortcuts="showShortcutsModal = true"
       @show-settings="showSettingsModal = true"
       @toggle-toc="toggleTocPanel"
+      @toggle-ai="toggleAiPanel"
     />
 
     <!-- Loading Overlay -->
@@ -1196,6 +1343,34 @@ onUnmounted(async () => {
       v-if="showSettingsModal"
       @close="showSettingsModal = false"
       @show-whats-new="showSettingsModal = false; showWhatsNewModal = true"
+    />
+
+    <!-- AI Assistant Panel (slide-in chat) -->
+    <AiPanel
+      v-if="aiPanelOpen"
+      :open="aiPanelOpen"
+      :doc-path="aiDocPath"
+      :doc-content="aiDocContent"
+      :selection-range="aiSelectionRange"
+      :selection-text="aiSelectionText"
+      :work-dir="aiWorkDir"
+      @close="aiPanelOpen = false"
+      @apply-content="onAiApplyContent"
+      @show-diff="onAiShowDiff"
+      @link-click="handleLinkClick"
+    />
+
+    <!-- AI First-run tooltip (auto-shows once) -->
+    <AiFirstRunTooltip @open-settings="showSettingsModal = true" />
+
+    <!-- AI Tmp Recovery Modal -->
+    <AiTmpRecoveryModal
+      v-if="tmpRecovery"
+      :tmp-path="tmpRecovery.tmpPath"
+      :modified-at="tmpRecovery.modifiedAt"
+      @restore="onTmpRestore"
+      @discard="onTmpDiscard"
+      @show-diff="onTmpShowDiff"
     />
 
     <!-- What's New Modal -->

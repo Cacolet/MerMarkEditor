@@ -35,3 +35,18 @@ src-tauri/Cargo.lock
 *.key
 !*.key.pub
 test-results/
+
+# Local planning / brainstorm docs (superpowers workflow output)
+docs/superpowers/
+
+# Local Claude Code workspace + worktrees
+.claude/
+
+# Playwright MCP run artifacts
+.playwright-mcp/
+
+# Local screenshots used during manual testing
+line-numbers-*.png
+
+# AI staging tmp files (sit next to docs during apply)
+*.mermark-ai.tmp

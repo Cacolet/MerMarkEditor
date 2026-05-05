@@ -1,17 +1,21 @@
 <script setup lang="ts">
 import { useToolbarActions } from '../composables/useToolbarActions';
 import RecentFilesDropdown from './RecentFilesDropdown.vue';
+import AiToolbarButton from './ai/AiToolbarButton.vue';
 
 const props = defineProps<{
   itemId: string;
   compact?: boolean;
   vertical?: boolean;
+  /** When true, vertical toolbar shows labels next to icons. */
+  expanded?: boolean;
   codeView?: boolean;
   isSplitActive?: boolean;
   diffActive?: boolean;
   canShowDiff?: boolean;
   canCompareTabs?: boolean;
   tocActive?: boolean;
+  aiActive?: boolean;
   dropdownDirection?: 'down' | 'up' | 'right';
 }>();
 
@@ -29,6 +33,7 @@ const emit = defineEmits<{
   showShortcuts: [];
   showSettings: [];
   toggleToc: [];
+  toggleAi: [];
 }>();
 
 const {
@@ -89,7 +94,9 @@ const isDisabled = (id: string) => {
 };
 
 const showLabel = (id: string) => {
-  if (props.compact || props.vertical) return false;
+  if (props.compact) return false;
+  // Vertical sidebar: labels only when the bar is in expanded mode.
+  if (props.vertical && !props.expanded) return false;
   // Items that always show labels (not icon-only)
   const labelItems = [
     'new-file', 'open-file', 'save-file', 'save-file-as', 'export-pdf',
@@ -492,6 +499,16 @@ const showLabel = (id: string) => {
     </svg>
     <span v-if="showLabel(itemId)">{{ t.compareTabs }}</span>
   </button>
+
+  <!-- AI toggle -->
+  <template v-else-if="itemId === 'ai-toggle'">
+    <AiToolbarButton
+      :active="props.aiActive ?? false"
+      :vertical="props.vertical"
+      :expanded="props.expanded"
+      @toggle="emit('toggleAi')"
+    />
+  </template>
 </template>
 
 <style scoped>

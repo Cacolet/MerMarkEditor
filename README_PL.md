@@ -14,12 +14,18 @@
 </p>
 
 <p align="center">
+  <a href="#asystent-ai-lokalnie">Asystent AI</a> •
   <a href="#funkcje">Funkcje</a> •
   <a href="#zrzuty-ekranu">Zrzuty ekranu</a> •
   <a href="#instalacja">Instalacja</a> •
   <a href="#użytkowanie">Użytkowanie</a> •
-  <a href="#rozwój">Rozwój</a> •
-  <a href="README.md">English</a>
+  <a href="#rozwój">Rozwój</a>
+</p>
+
+<p align="center">
+  <a href="README.md">English</a> •
+  <strong>Polski</strong> •
+  <a href="README_ZH.md">中文</a>
 </p>
 
 ---
@@ -34,7 +40,129 @@
 - **Natywna wydajność** - Zbudowany z Tauri dla szybkiego, lekkiego działania
 - **Edycja WYSIWYG** - Zobacz sformatowaną treść podczas pisania
 - **Integracja Mermaid** - Twórz diagramy bezpośrednio w dokumentach
+- **Lokalny asystent AI** - Rozmawiaj z Claude lub Codex o swoich notatkach; AI edytuje pliki bezpośrednio
 - **Wieloplatformowy** - Dostępny na Windows, macOS i Linux
+
+---
+
+## Asystent AI lokalnie
+
+Jeśli już płacisz za **Claude Code** albo **OpenAI Codex** — albo oba — MerMark wpina ten abonament prosto do edytora. Panel AI rozmawia z CLI `claude` i `codex` które masz już zalogowane, więc każde zapytanie idzie przez konto za które już płacisz. Żadnego klucza API do generowania. Żadnego drugiego rachunku. Żadnego pośrednika między tobą a dostawcą.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Vesperino/MerMarkEditor/master/docs/release-notes/v0.2.0/ai-panel-overview.png" alt="Panel AI — przegląd" />
+  <br>
+  <em>Panel AI zadokowany przy edytorze — wybór modelu, lista wątków, przypięte fragmenty i pasek użycia kontekstu na żywo</em>
+</p>
+
+### Korzystaj z abonamentu który już masz
+
+- **Claude Code lub Codex na planie Pro/Plus** — MerMark używa tego loginu, bez dodatkowego konta.
+- **Brak tokenu API do zarządzania** — CLI obsługuje auth, MerMark nigdy nie widzi twoich kluczy.
+- **Bezpośrednio do dostawcy** — zapytania idą z twojej maszyny prosto do Anthropic lub OpenAI; nic po drodze.
+- **Brak telemetrii** — z edytora nie wycieka nic poza wywołaniem CLI które sam mógłbyś uruchomić w terminalu.
+- **Zmiana dostawcy per turę** — jeden czat na Claude, następny na Codex; oba skonfigurowane w jednym panelu.
+
+### Co potrafi
+
+- **Edytuje twój markdown bezpośrednio** — "przepisz tę sekcję przyjaźniej", "wyciągnij action items", "przetłumacz na angielski". Zapisuje wprost na dysk atomicznie; edytor sam się przeładowuje.
+- **Czyta z autoryzowanych folderów** — wskaż folder projektu w access map i AI zobaczy notatki z wczoraj, glosariusz, style guide.
+- **Modyfikuje sąsiednie pliki** — rozdziela długi dokument, generuje podsumowanie obok źródła, buduje plik TOC dla folderu.
+- **Przeszukuje sieć** — włącz przełącznik `network` gdy potrzebujesz świeżych informacji.
+- **Uruchamia komendy shell** — opcjonalny przełącznik `bash` do grepowania notatek, uruchamiania builda, czegokolwiek z terminala. Domyślnie wyłączone.
+- **Auto-snapshot przy każdym zapisie AI** — jeden klik **Cofnij** jeśli wynik nie jest tym co chciałeś.
+
+### Wielokrotne zaznaczenia i załączniki obrazów
+
+- Przypnij jeden lub więcej zaznaczonych fragmentów — Visual *i* Code view.
+- AI dostaje tylko te fragmenty, nie cały dokument.
+- Wyłącz **Send** żeby zachować piny widoczne bez wysyłania.
+- Wklej zrzut (`Ctrl+V`), przeciągnij obraz, lub wybierz z dysku.
+- 8 MB na obraz, png / jpg / gif / webp / bmp.
+- Zarówno Claude jak i Codex widzą obraz.
+- Wysłane obrazy zostają w historii czatu jako miniatury — pamiętasz co przekazałeś.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Vesperino/MerMarkEditor/master/docs/release-notes/v0.2.0/pin-multi-fragments.png" alt="Pinowanie wielu fragmentów" />
+  <br>
+  <em>Przypnij wiele zaznaczonych fragmentów przed wysłaniem — każdy pojawia się jako numerowany chip w composerze</em>
+</p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Vesperino/MerMarkEditor/master/docs/release-notes/v0.2.0/image-in-history.png" alt="Miniatury obrazów w historii czatu" />
+  <br>
+  <em>Wysłane obrazy zostają w historii czatu jako miniatury — pamiętasz dokładnie co przekazałeś modelowi</em>
+</p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Vesperino/MerMarkEditor/master/docs/release-notes/v0.2.0/pin-multi-fragments-with-screen-effect.png" alt="Przypięte fragmenty + załączony zrzut — efekt po AI" />
+  <br>
+  <em>End-to-end: trzy przypięte paragrafy + załączony screenshot + jedno polecenie — AI przepisuje tekst i opisuje obraz w jednej turze</em>
+</p>
+
+### Wywołania narzędzi widoczne w czacie
+
+- Każde narzędzie wywołane przez model pojawia się jako kreskowany chip w transkrypcie.
+- Chip nosi nazwę narzędzia i jednolinijkowy podgląd argumentów.
+- Klik rozwija pretty-printed JSON pełnego wywołania.
+- Pokrywa Read, Edit, Write, Bash, WebFetch, codex shell — wszystko.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Vesperino/MerMarkEditor/master/docs/release-notes/v0.2.0/tool-chips.png" alt="Chipy wywołań narzędzi" />
+  <br>
+  <em>Każde narzędzie którego używa AI (Read, Edit, Write, Bash, WebFetch, ...) widoczne jako rozwijalny chip</em>
+</p>
+
+### Wątki per dokument z przywracaniem kontekstu
+
+- Każdy dokument ma własną przewijalną historię wątków.
+- **+** archiwizuje aktualny czat i zaczyna nowy.
+- Do 50 wątków na dokument, zapisane w `localStorage`.
+- Otwarcie starego wątku przywraca CLI, model i reasoning effort z których korzystałeś.
+
+### Bezpieczeństwo, audyt, kontrola dostępu per dokument
+
+- Per-dokument access map: wprost określone read paths, write paths, przełączniki narzędzi.
+- Dodawaj pliki przez **+ File**, całe foldery przez **+ Folder**.
+- Snapshoty przed edycją auto-rotowane (domyślnie 3 + przypięte), jeden klik **Cofnij**.
+- Status bar dot: zielony / czerwony / mrugający czerwony (bypass on).
+- Append-only audit log każdej akcji AI, podgląd w Settings.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Vesperino/MerMarkEditor/master/docs/release-notes/v0.2.0/access-map.png" alt="Edytor access map" />
+  <br>
+  <em>Access map per dokument — wprost określone read / write paths i przełączniki narzędzi</em>
+</p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Vesperino/MerMarkEditor/master/docs/release-notes/v0.2.0/snapshots.png" alt="Historia snapshotów" />
+  <br>
+  <em>Historia snapshotów — przywróć, przypnij, eksportuj lub usuń wersje sprzed edycji</em>
+</p>
+
+### Dwóch dostawców, jeden panel
+
+- Przełączaj `claude` / `codex` z headera czatu.
+- Domyślne ustawienia per CLI utrzymują się (ostatni model, ostatni effort).
+- Streaming tokenów z thinking-indicatorem dopóki pierwszy chunk nie dotrze.
+- Segmentowy pasek użycia kontekstu — input, cache, free — pobierany z usage zwracanego przez CLI.
+- Klikalne linki otwierają się przez dialog potwierdzania zewnętrznych linków edytora.
+- Skrót wysyłania: `Ctrl+Enter` (Win/Linux), `Cmd+Enter` (macOS).
+- Minimalizacja do bocznej zakładki, fullscreen, zamknięcie — wszystko w headerze panelu.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Vesperino/MerMarkEditor/master/docs/release-notes/v0.2.0/streaming-context.png" alt="Streaming i pasek kontekstu" />
+  <br>
+  <em>Streaming tokenów z segmentowym paskiem użycia kontekstu na żywo (input / cache / free)</em>
+</p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Vesperino/MerMarkEditor/master/docs/release-notes/v0.2.0/settings-ai.png" alt="Zakładka ustawień AI" />
+  <br>
+  <em>Ustawienia → AI — health instalacji i autentykacji, viewer audit logu, runtime bypass toggle</em>
+</p>
+
+Pełna lista funkcji — łącznie z rotacją snapshotów, recovery tmp po zawieszonych sesjach, multi-window-safe streamingiem i izolacją sesji per CLI — żyje w [RELEASE_NOTES.md](RELEASE_NOTES.md).
 
 ---
 
@@ -67,7 +195,7 @@
 - **Jasny/Ciemny motyw** - Komfort dla oczu
 - **Licznik znaków i słów** - Śledź postępy
 - **Automatyczny zapis** - Nigdy nie stracisz pracy
-- **Dwujęzyczny interfejs** - Polski i angielski
+- **Trójjęzyczny interfejs** - polski, angielski i chiński
 - **Modal skrótów klawiszowych** - Szybki podgląd wszystkich skrótów (`Ctrl+/`)
 
 ### Zaawansowane funkcje
@@ -333,11 +461,18 @@ Ten projekt jest licencjonowany na warunkach **licencji MIT** - zobacz plik [LIC
 
 ## Wsparcie
 
-Jeśli uważasz ten projekt za użyteczny, rozważ:
+MerMark jest i pozostanie darmowy oraz open source na licencji MIT. Jeśli uważasz ten projekt za użyteczny, rozważ:
 
 - Danie gwiazdki na GitHub
 - Zgłaszanie błędów i sugestii funkcji
 - Wkład w kod źródłowy
+- [Postawienie mi kawy](https://buymeacoffee.com/vesperinio) — całkowicie opcjonalnie, jeżeli MerMark oszczędza ci czas
+
+<p align="center">
+  <a href="https://buymeacoffee.com/vesperinio">
+    <img src="https://img.shields.io/badge/Postaw_mi_kaw%C4%99-FFDD00?style=flat&logo=buy-me-a-coffee&logoColor=black" alt="Postaw mi kawę" />
+  </a>
+</p>
 
 ---
 

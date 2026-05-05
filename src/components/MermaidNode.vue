@@ -208,12 +208,13 @@ const renderMermaid = async () => {
       .replace(/__BR__/g, '<br/>')
       .replace(/\\n/g, '<br/>');
     const { svg } = await mermaid.render(id, codeForRender);
+    if (!containerRef.value) return;
     containerRef.value.innerHTML = svg;
     // Apply current size to rendered SVG
     applySvgSize();
   } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : t.value.diagramError;
-    containerRef.value.innerHTML = "";
+    if (containerRef.value) containerRef.value.innerHTML = "";
   }
 };
 
@@ -363,9 +364,9 @@ watch(editCode, () => {
           </div>
           <div class="editor-preview-pane" :style="{ flex: `0 0 ${100 - splitRatio}%` }">
             <div class="editor-preview-toolbar">
-              <button @click="previewZoomOut" class="btn-zoom" title="Zoom out">−</button>
+              <button @click="previewZoomOut" class="btn-zoom" :title="t.zoomOut">−</button>
               <span class="zoom-level">{{ previewZoomPercent }}%</span>
-              <button @click="previewZoomIn" class="btn-zoom" title="Zoom in">+</button>
+              <button @click="previewZoomIn" class="btn-zoom" :title="t.zoomIn">+</button>
               <button @click="previewResetZoom" class="btn-zoom-text">{{ t.reset }}</button>
               <button @click="handlePreviewFitToView" class="btn-zoom-text">{{ t.fit }}</button>
               <div v-if="previewError" class="preview-error-inline">{{ previewError }}</div>
@@ -1001,8 +1002,13 @@ html.dark .mermaid-content :deep(svg .messageLine1) {
 }
 
 .fullscreen-content :deep(svg) {
-  max-width: none;
-  height: auto;
+  /* Override the inline width/max-width that applySvgSize sets to render the
+     diagram at 25/50/75/100 % inside the document. In fullscreen we want a
+     1:1 SVG that the zoom transform can scale up cleanly without compounding
+     a 4x downscale (which produced blurry output at 600 % zoom). */
+  width: 100% !important;
+  max-width: 100% !important;
+  height: auto !important;
 }
 
 /* ========== Print Styles ========== */

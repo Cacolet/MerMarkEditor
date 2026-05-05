@@ -2,6 +2,7 @@
 import { useLayoutConfig } from '../composables/useLayoutConfig';
 import { useToolbarActions } from '../composables/useToolbarActions';
 import ToolbarItemRenderer from './ToolbarItemRenderer.vue';
+import AiStatusbarIndicator from './ai/AiStatusbarIndicator.vue';
 
 const { itemsForZone } = useLayoutConfig();
 const { closeDropdowns } = useToolbarActions();
@@ -15,6 +16,7 @@ const props = defineProps<{
   canShowDiff?: boolean;
   canCompareTabs?: boolean;
   tocActive?: boolean;
+  aiActive?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -31,7 +33,8 @@ const emit = defineEmits<{
   showShortcuts: [];
   showSettings: [];
   toggleToc: [];
-}>();
+  toggleAi: [];
+}>(); 
 </script>
 
 <template>
@@ -46,6 +49,7 @@ const emit = defineEmits<{
         :can-show-diff="props.canShowDiff"
         :can-compare-tabs="props.canCompareTabs"
         :toc-active="props.tocActive"
+        :ai-active="props.aiActive"
         dropdown-direction="up"
         @new-file="emit('newFile')"
         @open-file="emit('openFile')"
@@ -60,8 +64,10 @@ const emit = defineEmits<{
         @show-shortcuts="emit('showShortcuts')"
         @show-settings="emit('showSettings')"
         @toggle-toc="emit('toggleToc')"
+        @toggle-ai="emit('toggleAi')"
       />
     </template>
+    <AiStatusbarIndicator />
   </div>
 </template>
 

@@ -4,6 +4,7 @@ import { readTextFile, writeTextFile, rename, remove } from '@tauri-apps/plugin-
 import { open as openExternal } from '@tauri-apps/plugin-shell';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { htmlToMarkdown, markdownToHtml, detectLineEnding, applyLineEnding } from '../utils/markdown-converter';
+import { aiCommands } from '../services/aiCommands';
 import type { Tab } from './useTabs';
 import { EMPTY_TAB_CONTENT, DEFAULT_FILE_NAME, DOM_SELECTORS, TIMING } from '../constants';
 
@@ -22,6 +23,10 @@ export interface UseFileOperationsOptions {
   markSaveStart?: (filePath: string) => void;
   markSaveEnd?: (filePath: string, content: string) => void;
   onFileOpened?: (filePath: string, content: string) => void;
+  /** Called after a successful save / save-as so the host can register a
+   *  file watcher for new paths. Safe to call repeatedly — the watcher
+   *  layer ignores already-watched files. */
+  onAfterSave?: (filePath: string, content: string) => void;
   /** Returns 'save' | 'cancel' | mergedMarkdownString (to save the merged version).
    *  localMarkdown is the current editor content (used to compute a local→disk diff). */
   onPreSaveConflict?: (filePath: string, diskContent: string, localMarkdown: string) => Promise<'save' | 'cancel' | string>;
@@ -56,6 +61,7 @@ export function useFileOperations(options: UseFileOperationsOptions): UseFileOpe
     setEditorContent,
     markSaveStart,
     markSaveEnd,
+    onAfterSave,
     onFileOpened,
     onPreSaveConflict,
   } = options;
@@ -223,6 +229,9 @@ export function useFileOperations(options: UseFileOperationsOptions): UseFileOpe
       }
       tabs.value[tabIndex].originalMarkdown = markdown;
     }
+
+    // Tell host to start watching this path (no-op if already watched).
+    onAfterSave?.(filePath, markdown);
   };
 
   const saveFile = async (): Promise<void> => {
@@ -252,13 +261,22 @@ export function useFileOperations(options: UseFileOperationsOptions): UseFileOpe
 
   const saveFileAs = async (): Promise<void> => {
     try {
+      const oldPath = currentFile.value;
       const filePath = await save({
         filters: [{ name: 'Markdown', extensions: ['md'] }],
-        defaultPath: currentFile.value?.split(/[/\\]/).pop() || 'dokument.md',
+        defaultPath: oldPath?.split(/[/\\]/).pop() || 'dokument.md',
       });
 
       if (filePath) {
         await writeAndUpdateTab(filePath);
+        // Migrate AI metadata (sessions, access map, snapshots) to the new path.
+        if (oldPath && oldPath !== filePath) {
+          await Promise.all([
+            aiCommands.sessionMigrate(oldPath, filePath),
+            aiCommands.accessMigrate(oldPath, filePath),
+            aiCommands.snapshotMigrate(oldPath, filePath),
+          ]).catch(() => {}); // best-effort; don't fail save on AI metadata errors
+        }
       }
     } catch (error) {
       console.error('Error saving file:', error);

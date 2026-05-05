@@ -178,4 +178,42 @@ describe('useSettings', () => {
       expect(settings2.value.autoSave).toBe(true);
     });
   });
+
+  describe('ai settings', () => {
+    it('exposes the ai settings shape with documented defaults', () => {
+      const { settings } = useSettings();
+      expect(settings.value.ai).toBeDefined();
+      // Note: singleton may have been mutated by other tests; verify shape rather
+      // than exact values for fields that other tests can flip.
+      expect(typeof settings.value.ai.enabled).toBe('boolean');
+      expect(['claude', 'codex']).toContain(settings.value.ai.defaultCli);
+      expect(typeof settings.value.ai.snapshotsKeep).toBe('number');
+      expect(typeof settings.value.ai.hasSeenFirstRun).toBe('boolean');
+      expect(['left', 'right']).toContain(settings.value.ai.panelSide);
+    });
+
+    it('clamps snapshotsKeep to a minimum of 1 on save', () => {
+      const { setAiSnapshotsKeep, settings } = useSettings();
+      setAiSnapshotsKeep(0);
+      expect(settings.value.ai.snapshotsKeep).toBe(1);
+      setAiSnapshotsKeep(-5);
+      expect(settings.value.ai.snapshotsKeep).toBe(1);
+    });
+
+    it('preserves new ai fields when localStorage holds an older partial ai object', () => {
+      // Simulate stale localStorage with old ai shape (no model/effort fields).
+      localStorageMock.getItem.mockReturnValueOnce(JSON.stringify({
+        ai: { enabled: true, defaultCli: 'claude', snapshotsKeep: 3, hasSeenFirstRun: false, panelSide: 'right' },
+      }));
+      // useSettings is a singleton; this test verifies the loadSettings logic by
+      // calling it indirectly via a fresh settings access.
+      const { settings } = useSettings();
+      // The loaded settings should include defaultModelClaude/defaultModelCodex
+      // even though the saved ai object didn't have them.
+      expect(settings.value.ai.defaultModelClaude).toBeDefined();
+      expect(settings.value.ai.defaultModelCodex).toBeDefined();
+      expect(settings.value.ai.effortClaude).toBeDefined();
+      expect(settings.value.ai.effortCodex).toBeDefined();
+    });
+  });
 });

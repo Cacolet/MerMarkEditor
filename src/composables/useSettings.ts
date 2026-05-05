@@ -5,6 +5,20 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 
 export type ThemeMode = 'light' | 'dark';
 export type CodeThemeMode = 'dark' | 'white';
+export type CliKind = 'claude' | 'codex';
+export type PanelSide = 'left' | 'right';
+
+export interface AiSettings {
+  enabled: boolean;
+  defaultCli: CliKind;
+  defaultModelClaude: string;
+  defaultModelCodex: string;
+  effortClaude: string;
+  effortCodex: string;
+  snapshotsKeep: number;
+  hasSeenFirstRun: boolean;
+  panelSide: PanelSide;
+}
 
 export interface FontPreset {
   id: string;
@@ -54,6 +68,9 @@ export interface AppSettings {
   spellcheck: boolean;
   expandTabs: boolean;
   showLineNumbers: boolean;
+  /** When true, the vertical left toolbar widens to show text labels next to icons. */
+  leftBarExpanded: boolean;
+  ai: AiSettings;
 }
 
 const STORAGE_KEY = 'mermark-settings';
@@ -102,7 +119,14 @@ function loadSettings(): AppSettings {
       if (parsed.codeTheme && !['dark', 'white'].includes(parsed.codeTheme)) {
         parsed.codeTheme = getDefaultSettings().codeTheme;
       }
-      return { ...getDefaultSettings(), ...parsed };
+      if (parsed.ai && typeof parsed.ai.snapshotsKeep === 'number') {
+        parsed.ai.snapshotsKeep = Math.max(1, Math.floor(parsed.ai.snapshotsKeep));
+      }
+      const defaults = getDefaultSettings();
+      // Deep-merge the ai field so new fields added in updates get their defaults
+      // even when localStorage holds an older partial ai object.
+      const mergedAi = { ...defaults.ai, ...(parsed.ai ?? {}) };
+      return { ...defaults, ...parsed, ai: mergedAi };
     }
   } catch (error) {
     console.error('Error loading settings:', error);
@@ -124,6 +148,18 @@ function getDefaultSettings(): AppSettings {
     spellcheck: false,
     expandTabs: false,
     showLineNumbers: false,
+    leftBarExpanded: false,
+    ai: {
+      enabled: true,
+      defaultCli: 'claude',
+      defaultModelClaude: 'claude-opus-4-5',
+      defaultModelCodex: 'gpt-5',
+      effortClaude: 'high',
+      effortCodex: 'high',
+      snapshotsKeep: 3,
+      hasSeenFirstRun: false,
+      panelSide: 'right',
+    },
   };
 }
 
@@ -214,6 +250,21 @@ export function useSettings() {
     settings.value.showLineNumbers = !settings.value.showLineNumbers;
   };
 
+  const setLeftBarExpanded = (v: boolean) => { settings.value.leftBarExpanded = v; };
+  const toggleLeftBarExpanded = () => { settings.value.leftBarExpanded = !settings.value.leftBarExpanded; };
+
+  const setAiEnabled = (v: boolean) => { settings.value.ai.enabled = v; };
+  const setAiDefaultCli = (v: CliKind) => { settings.value.ai.defaultCli = v; };
+  const setAiDefaultModelClaude = (v: string) => { settings.value.ai.defaultModelClaude = v; };
+  const setAiDefaultModelCodex = (v: string) => { settings.value.ai.defaultModelCodex = v; };
+  const setAiEffortClaude = (v: string) => { settings.value.ai.effortClaude = v; };
+  const setAiEffortCodex = (v: string) => { settings.value.ai.effortCodex = v; };
+  const setAiSnapshotsKeep = (v: number) => {
+    settings.value.ai.snapshotsKeep = Math.max(1, Math.floor(v));
+  };
+  const setAiHasSeenFirstRun = (v: boolean) => { settings.value.ai.hasSeenFirstRun = v; };
+  const setAiPanelSide = (v: PanelSide) => { settings.value.ai.panelSide = v; };
+
   return {
     settings,
     setAutoSave,
@@ -232,6 +283,17 @@ export function useSettings() {
     setExpandTabs,
     setShowLineNumbers,
     toggleShowLineNumbers,
+    setLeftBarExpanded,
+    toggleLeftBarExpanded,
+    setAiEnabled,
+    setAiDefaultCli,
+    setAiDefaultModelClaude,
+    setAiDefaultModelCodex,
+    setAiEffortClaude,
+    setAiEffortCodex,
+    setAiSnapshotsKeep,
+    setAiHasSeenFirstRun,
+    setAiPanelSide,
   };
 }
 
