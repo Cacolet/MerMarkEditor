@@ -55,6 +55,7 @@ import { useSettings } from "../composables/useSettings";
 import { useFootnotes } from "../composables/useFootnotes";
 import { useLineNumbers } from "../composables/useLineNumbers";
 import { resolveEditorImages, getDirectoryFromFilePath } from "../utils/image-resolver";
+import { importImageBytes } from "../services/imageImport";
 import TableContextMenu from "./TableContextMenu.vue";
 import ImagePreview from "./ImagePreview.vue";
 import EditorGutter from "./EditorGutter.vue";
@@ -179,6 +180,61 @@ const contextMenuY = ref(0);
 const showImagePreview = ref(false);
 const previewImageSrc = ref('');
 const previewImageAlt = ref('');
+
+// Floating overlay for the currently-hovered editor image. Positioned with
+// fixed coords against the viewport so it tracks the image during scroll
+// without needing a per-image NodeView (which would conflict with the
+// blob-url image-resolver that mutates img.src directly).
+const hoveredImage = ref<HTMLImageElement | null>(null);
+const imageOverlayRect = ref<{ top: number; right: number } | null>(null);
+let hideOverlayTimer: number | null = null;
+
+function showOverlayFor(img: HTMLImageElement) {
+  if (hideOverlayTimer !== null) {
+    window.clearTimeout(hideOverlayTimer);
+    hideOverlayTimer = null;
+  }
+  const rect = img.getBoundingClientRect();
+  imageOverlayRect.value = { top: rect.top + 6, right: window.innerWidth - rect.right - 6 };
+  hoveredImage.value = img;
+}
+
+function scheduleHideOverlay() {
+  if (hideOverlayTimer !== null) window.clearTimeout(hideOverlayTimer);
+  hideOverlayTimer = window.setTimeout(() => {
+    hoveredImage.value = null;
+    imageOverlayRect.value = null;
+    hideOverlayTimer = null;
+  }, 120);
+}
+
+function deleteHoveredImage() {
+  const img = hoveredImage.value;
+  const ed = editor.value;
+  if (!img || !ed) return;
+  try {
+    const pos = ed.view.posAtDOM(img, 0);
+    ed.chain().focus().setNodeSelection(pos).deleteSelection().run();
+  } catch (e) {
+    console.warn('[Editor] Failed to delete image:', e);
+  }
+  hoveredImage.value = null;
+  imageOverlayRect.value = null;
+}
+
+const handleEditorMouseOver = (event: MouseEvent) => {
+  const target = event.target as HTMLElement | null;
+  if (target?.tagName === 'IMG' && target.classList.contains('editor-image')) {
+    showOverlayFor(target as HTMLImageElement);
+  }
+};
+
+const handleEditorMouseOut = (event: MouseEvent) => {
+  const target = event.target as HTMLElement | null;
+  if (target?.tagName === 'IMG' && target.classList.contains('editor-image')) {
+    scheduleHideOverlay();
+  }
+};
 
 
 
@@ -325,6 +381,37 @@ const emit = defineEmits<{
   "linkClick": [href: string];
 }>();
 
+function pickImageFile(data: DataTransfer): File | null {
+  for (let i = 0; i < data.items.length; i++) {
+    const item = data.items[i];
+    if (item.kind === 'file' && item.type.startsWith('image/')) {
+      const file = item.getAsFile();
+      if (file) return file;
+    }
+  }
+  return null;
+}
+
+function mimeToExtension(mime: string): string {
+  const m = mime.toLowerCase();
+  if (m === 'image/jpeg' || m === 'image/jpg') return 'jpg';
+  if (m === 'image/svg+xml') return 'svg';
+  const slash = m.indexOf('/');
+  return slash >= 0 ? m.slice(slash + 1) : 'png';
+}
+
+async function handlePastedImage(file: File): Promise<void> {
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const ext = mimeToExtension(file.type);
+    const stemHint = file.name ? file.name.replace(/\.[^.]+$/, '') : 'pasted-image';
+    const result = await importImageBytes(bytes, ext, props.filePath ?? null, stemHint);
+    await insertImagesByPath([{ path: result.markdownPath, alt: result.altText }]);
+  } catch (e) {
+    console.warn('[Editor] Failed to import pasted image:', e);
+  }
+}
+
 const editor = useEditor({
   content: props.modelValue || `<p>${t.value.placeholder}</p>`,
   // Resolve local image paths to blob URLs when the editor is first created.
@@ -444,6 +531,13 @@ const editor = useEditor({
     handlePaste: (_view, event) => {
       const clipboardData = event.clipboardData;
       if (!clipboardData) return false;
+
+      const imageFile = pickImageFile(clipboardData);
+      if (imageFile) {
+        event.preventDefault();
+        void handlePastedImage(imageFile);
+        return true;
+      }
 
       // Try HTML table first (case-insensitive check)
       const html = clipboardData.getData("text/html");
@@ -657,8 +751,40 @@ const focusSearchMatch = (match: VisualSearchMatch) => {
   });
 };
 
+async function insertImagesByPath(items: { path: string; alt: string }[]) {
+  const ed = editor.value;
+  if (!ed || items.length === 0) return;
+
+  for (const item of items) {
+    ed.chain().focus().setImage({
+      src: item.path,
+      alt: item.alt,
+      'data-original-src': item.path,
+    } as Parameters<typeof ed.commands.setImage>[0]).run();
+  }
+
+  await nextTick();
+  if (!props.filePath) return;
+
+  const editorEl = editorContainerRef.value?.querySelector('.ProseMirror');
+  if (!editorEl) return;
+  const baseDir = getDirectoryFromFilePath(props.filePath);
+  if (!baseDir) return;
+
+  imageResolutionInProgress = true;
+  const domObs = (ed.view as any).domObserver;
+  domObs?.stop();
+  try {
+    await resolveEditorImages(editorEl, baseDir);
+  } finally {
+    domObs?.start();
+    imageResolutionInProgress = false;
+  }
+}
+
 defineExpose({
   editor,
+  insertImagesByPath,
   getSearchTextMap,
   setSearchHighlights,
   clearSearchHighlights,
@@ -667,7 +793,14 @@ defineExpose({
 </script>
 
 <template>
-  <div class="editor-container" ref="editorContainerRef" @click="handleEditorClick" @contextmenu="handleContextMenu" @mouseover="footnotes.handleMouseOver" @mouseout="footnotes.handleMouseOut">
+  <div
+    class="editor-container"
+    ref="editorContainerRef"
+    @click="handleEditorClick"
+    @contextmenu="handleContextMenu"
+    @mouseover="(e) => { footnotes.handleMouseOver(e); handleEditorMouseOver(e); }"
+    @mouseout="(e) => { footnotes.handleMouseOut(e); handleEditorMouseOut(e); }"
+  >
     <div
       ref="contentWrapperRef"
       class="editor-content-wrapper"
@@ -718,6 +851,28 @@ defineExpose({
         <button class="footnote-popover-save" @click="footnotes.savePopover">Save</button>
       </div>
     </div>
+    <Teleport to="body">
+      <div
+        v-if="imageOverlayRect && hoveredImage"
+        class="editor-image-toolbar"
+        :style="{ top: imageOverlayRect.top + 'px', right: imageOverlayRect.right + 'px' }"
+        @mouseenter="showOverlayFor(hoveredImage)"
+        @mouseleave="scheduleHideOverlay"
+      >
+        <button
+          class="editor-image-toolbar-btn danger"
+          v-tooltip="t.deleteImage"
+          @click.stop="deleteHoveredImage"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+            <path d="M10 11v6"/>
+            <path d="M14 11v6"/>
+          </svg>
+        </button>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -1278,5 +1433,43 @@ defineExpose({
 .editor-content .tiptap section.footnotes li p {
   margin: 0;
   display: inline;
+}
+
+.editor-image-toolbar {
+  position: fixed;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--dialog-bg, rgba(30, 30, 30, 0.95));
+  border: 1px solid var(--border-primary, rgba(255, 255, 255, 0.12));
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  z-index: 50;
+  pointer-events: auto;
+  user-select: none;
+}
+
+.editor-image-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary, #d4d4d4);
+  cursor: pointer;
+  padding: 0;
+}
+
+.editor-image-toolbar-btn:hover {
+  background: var(--hover-bg, rgba(255, 255, 255, 0.1));
+  color: var(--text-primary, #fff);
+}
+
+.editor-image-toolbar-btn.danger:hover {
+  background: var(--danger-text-bg, rgba(229, 76, 76, 0.18));
+  color: var(--danger, #f56565);
 }
 </style>

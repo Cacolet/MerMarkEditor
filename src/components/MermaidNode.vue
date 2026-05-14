@@ -263,8 +263,39 @@ const renderPreview = async () => {
 
   mermaid.initialize({
     startOnLoad: false,
-    theme: isDark.value ? "dark" : "default",
+    theme: "base",
     securityLevel: "loose",
+    themeVariables: isDark.value
+      ? {
+          // Dark palette — overrides every Mermaid "base" theme color so
+          // diagrams stay legible even when the markdown ships its own
+          // classDef fill:#... declarations.
+          background: "#1a202c",
+          primaryColor: "#2d3748",
+          primaryTextColor: "#f1f5f9",
+          primaryBorderColor: "#94a3b8",
+          secondaryColor: "#374151",
+          secondaryTextColor: "#f1f5f9",
+          secondaryBorderColor: "#94a3b8",
+          tertiaryColor: "#1f2937",
+          tertiaryTextColor: "#f1f5f9",
+          tertiaryBorderColor: "#94a3b8",
+          mainBkg: "#2d3748",
+          secondBkg: "#374151",
+          tertiaryBkg: "#1f2937",
+          nodeBorder: "#94a3b8",
+          clusterBkg: "#1f2937",
+          clusterBorder: "#6b7280",
+          defaultLinkColor: "#cbd5e1",
+          titleColor: "#f1f5f9",
+          edgeLabelBackground: "#1f2937",
+          textColor: "#f1f5f9",
+          nodeTextColor: "#f1f5f9",
+          lineColor: "#cbd5e1",
+          labelTextColor: "#f1f5f9",
+          labelBackground: "#1f2937",
+        }
+      : undefined,
   });
 
   try {
@@ -279,6 +310,7 @@ const renderPreview = async () => {
     const { svg } = await mermaid.render(id, codeForRender);
     previewContainerRef.value.innerHTML = svg;
     await fixMermaidViewBox(previewContainerRef.value);
+    if (isDark.value) repaintMermaidDark(previewContainerRef.value);
   } catch (e: unknown) {
     previewError.value = e instanceof Error ? e.message : t.value.diagramError;
     previewContainerRef.value.innerHTML = "";
@@ -402,8 +434,39 @@ const renderMermaid = async () => {
 
   mermaid.initialize({
     startOnLoad: false,
-    theme: isDark.value ? "dark" : "default",
+    theme: "base",
     securityLevel: "loose",
+    themeVariables: isDark.value
+      ? {
+          // Dark palette — overrides every Mermaid "base" theme color so
+          // diagrams stay legible even when the markdown ships its own
+          // classDef fill:#... declarations.
+          background: "#1a202c",
+          primaryColor: "#2d3748",
+          primaryTextColor: "#f1f5f9",
+          primaryBorderColor: "#94a3b8",
+          secondaryColor: "#374151",
+          secondaryTextColor: "#f1f5f9",
+          secondaryBorderColor: "#94a3b8",
+          tertiaryColor: "#1f2937",
+          tertiaryTextColor: "#f1f5f9",
+          tertiaryBorderColor: "#94a3b8",
+          mainBkg: "#2d3748",
+          secondBkg: "#374151",
+          tertiaryBkg: "#1f2937",
+          nodeBorder: "#94a3b8",
+          clusterBkg: "#1f2937",
+          clusterBorder: "#6b7280",
+          defaultLinkColor: "#cbd5e1",
+          titleColor: "#f1f5f9",
+          edgeLabelBackground: "#1f2937",
+          textColor: "#f1f5f9",
+          nodeTextColor: "#f1f5f9",
+          lineColor: "#cbd5e1",
+          labelTextColor: "#f1f5f9",
+          labelBackground: "#1f2937",
+        }
+      : undefined,
   });
 
   try {
@@ -422,11 +485,125 @@ const renderMermaid = async () => {
     await fixMermaidViewBox(containerRef.value);
     if (!containerRef.value) return;
     applySvgSize();
+    if (isDark.value) repaintMermaidDark(containerRef.value);
   } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : t.value.diagramError;
     if (containerRef.value) containerRef.value.innerHTML = "";
   }
 };
+
+// Post-process the rendered SVG to force a dark palette. Mermaid's inline
+// <style> + classDef styles win against scoped CSS, so we walk the DOM and
+// set attributes/inline styles directly — that wins against everything.
+const DARK_NODE_FILL = "#2d3748";
+const DARK_NODE_STROKE = "#94a3b8";
+const DARK_CLUSTER_FILL = "#1f2937";
+const DARK_TEXT = "#f1f5f9";
+const DARK_EDGE = "#cbd5e1";
+
+function repaintMermaidDark(container: HTMLElement): void {
+  const svg = container.querySelector("svg");
+  if (!svg) return;
+
+  // Inject a high-priority style block AFTER Mermaid's own <style>. Cascade
+  // order means later rules win on tie — combined with `!important` this
+  // beats any classDef-emitted fill without removing Mermaid's own style
+  // (which carries marker geometry / display rules we must keep).
+  const overrideStyleId = "mermark-mermaid-dark-override";
+  let overrideStyle = svg.querySelector(`style#${overrideStyleId}`);
+  if (!overrideStyle) {
+    overrideStyle = document.createElementNS("http://www.w3.org/2000/svg", "style");
+    overrideStyle.id = overrideStyleId;
+    svg.appendChild(overrideStyle);
+  }
+  overrideStyle.textContent = `
+    g.node rect, g.node polygon, g.node ellipse, g.node circle, g.node path:not(.arrowMarkerPath),
+    .label-container, .basic.label-container {
+      fill: ${DARK_NODE_FILL} !important;
+      stroke: ${DARK_NODE_STROKE} !important;
+    }
+    .cluster rect, .cluster polygon {
+      fill: ${DARK_CLUSTER_FILL} !important;
+      stroke: #6b7280 !important;
+    }
+    text, tspan { fill: ${DARK_TEXT} !important; }
+    foreignObject *, .nodeLabel, .nodeLabel *, .cluster-label *, .edgeLabel * {
+      color: ${DARK_TEXT} !important;
+    }
+    .edgePath path:not(.arrowMarkerPath), .flowchart-link, path.path,
+    line, .messageLine0, .messageLine1 {
+      stroke: ${DARK_EDGE} !important;
+    }
+  `;
+
+  const setStyleImportant = (el: SVGElement | HTMLElement, prop: string, val: string) => {
+    el.style.setProperty(prop, val, "important");
+  };
+
+  const isInsideMarker = (el: Element): boolean => !!el.closest("marker");
+
+  // 1) Every shape inside a node group — flowchart nodes, sequence
+  // actors, etc. Walk every rect/polygon/ellipse/circle/path under a
+  // .node (no matter how deep), skipping arrow-marker geometry.
+  svg.querySelectorAll<SVGElement>(
+    "g.node rect, g.node polygon, g.node ellipse, g.node circle, g.node path"
+  ).forEach((el) => {
+    if (isInsideMarker(el)) return;
+    el.setAttribute("fill", DARK_NODE_FILL);
+    el.setAttribute("stroke", DARK_NODE_STROKE);
+    setStyleImportant(el, "fill", DARK_NODE_FILL);
+    setStyleImportant(el, "stroke", DARK_NODE_STROKE);
+  });
+
+  // 2) Free-standing label containers Mermaid emits outside .node groups.
+  svg.querySelectorAll<SVGElement>(".label-container, .basic.label-container").forEach((el) => {
+    el.setAttribute("fill", DARK_NODE_FILL);
+    el.setAttribute("stroke", DARK_NODE_STROKE);
+    setStyleImportant(el, "fill", DARK_NODE_FILL);
+    setStyleImportant(el, "stroke", DARK_NODE_STROKE);
+  });
+
+  // 3) Subgraph / cluster backgrounds — slightly darker, distinct border.
+  svg.querySelectorAll<SVGElement>(".cluster rect, .cluster polygon, .cluster path").forEach((el) => {
+    if (isInsideMarker(el)) return;
+    el.setAttribute("fill", DARK_CLUSTER_FILL);
+    el.setAttribute("stroke", "#6b7280");
+    setStyleImportant(el, "fill", DARK_CLUSTER_FILL);
+    setStyleImportant(el, "stroke", "#6b7280");
+  });
+
+  // 4) SVG <text> + <tspan> — all label text rendered as plain SVG.
+  svg.querySelectorAll<SVGElement>("text, tspan").forEach((el) => {
+    if (isInsideMarker(el)) return;
+    el.setAttribute("fill", DARK_TEXT);
+    setStyleImportant(el, "fill", DARK_TEXT);
+  });
+
+  // 5) foreignObject labels — Mermaid renders HTML inside SVG for many
+  // diagram types. Force a light color across the entire HTML subtree.
+  svg.querySelectorAll<HTMLElement>("foreignObject *").forEach((el) => {
+    setStyleImportant(el, "color", DARK_TEXT);
+    if (el.style.backgroundColor && el.style.backgroundColor !== "transparent") {
+      setStyleImportant(el, "background-color", DARK_CLUSTER_FILL);
+    }
+  });
+
+  // 6) Edges and arrows — strokes only. Exclude paths inside <marker>
+  // (arrow heads) so we don't paint over the marker-defined fill or add
+  // an oversized stroke that warps the arrow geometry.
+  svg.querySelectorAll<SVGElement>(".edgePath path, .flowchart-link, path.path, line, .messageLine0, .messageLine1").forEach((el) => {
+    if (isInsideMarker(el)) return;
+    if (el.classList.contains("arrowMarkerPath")) return;
+    el.setAttribute("stroke", DARK_EDGE);
+    setStyleImportant(el, "stroke", DARK_EDGE);
+  });
+
+  // 7) Arrow markers — fill, not stroke.
+  svg.querySelectorAll<SVGElement>("marker path, marker polygon").forEach((el) => {
+    el.setAttribute("fill", DARK_EDGE);
+    setStyleImportant(el, "fill", DARK_EDGE);
+  });
+}
 
 onMounted(() => {
   renderMermaid();
@@ -1428,6 +1605,65 @@ html.dark .mermaid-content :deep(svg line),
 html.dark .mermaid-content :deep(svg .messageLine0),
 html.dark .mermaid-content :deep(svg .messageLine1) {
   stroke: #aaaaaa !important;
+}
+
+/* Dark mode: force readable labels regardless of diagram-side classDef.
+   Diagrams that ship their own `classDef fill:#fff` inject a <style> block
+   into the SVG that wins against simpler selectors. The selectors below are
+   long on purpose so they outrank that inline style in specificity, and
+   `!important` covers the rest. Both default and minimal app variants
+   inherit this because they share the `html.dark` class. */
+html.dark .mermaid-content :deep(svg .node rect),
+html.dark .mermaid-content :deep(svg .node polygon),
+html.dark .mermaid-content :deep(svg .node ellipse),
+html.dark .mermaid-content :deep(svg .node circle),
+html.dark .mermaid-content :deep(svg .node path),
+html.dark .mermaid-content :deep(svg g.node > rect),
+html.dark .mermaid-content :deep(svg g.node > polygon),
+html.dark .mermaid-content :deep(svg g.node > path),
+html.dark .mermaid-content :deep(svg .label-container),
+html.dark .mermaid-content :deep(svg .basic.label-container),
+html.dark .mermaid-content :deep(svg [class*="default"] rect),
+html.dark .mermaid-content :deep(svg [class*="node"] > rect) {
+  fill: #2d3748 !important;
+  stroke: #9ca3af !important;
+}
+
+html.dark .mermaid-content :deep(svg .nodeLabel),
+html.dark .mermaid-content :deep(svg .nodeLabel p),
+html.dark .mermaid-content :deep(svg .nodeLabel span),
+html.dark .mermaid-content :deep(svg .nodeLabel div),
+html.dark .mermaid-content :deep(svg .label .nodeLabel),
+html.dark .mermaid-content :deep(svg foreignObject span),
+html.dark .mermaid-content :deep(svg foreignObject p),
+html.dark .mermaid-content :deep(svg foreignObject div),
+html.dark .mermaid-content :deep(svg .label text),
+html.dark .mermaid-content :deep(svg text),
+html.dark .mermaid-content :deep(svg tspan) {
+  fill: #f3f4f6 !important;
+  color: #f3f4f6 !important;
+}
+
+html.dark .mermaid-content :deep(svg .edgeLabel),
+html.dark .mermaid-content :deep(svg .edgeLabel rect),
+html.dark .mermaid-content :deep(svg .edgeLabel foreignObject div),
+html.dark .mermaid-content :deep(svg .edgeLabel span) {
+  background-color: #1f2937 !important;
+  fill: #1f2937 !important;
+}
+
+html.dark .mermaid-content :deep(svg .cluster rect),
+html.dark .mermaid-content :deep(svg .cluster polygon) {
+  fill: rgba(45, 55, 72, 0.4) !important;
+  stroke: #6b7280 !important;
+}
+
+/* Cylinders / databases — extra surface shape sometimes rendered as
+   separate <ellipse> + <path>. Force the body fill too. */
+html.dark .mermaid-content :deep(svg .node g > ellipse),
+html.dark .mermaid-content :deep(svg .node g > path) {
+  fill: #2d3748 !important;
+  stroke: #9ca3af !important;
 }
 
 .btn-fullscreen {

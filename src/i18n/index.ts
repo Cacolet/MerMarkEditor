@@ -144,6 +144,7 @@ export interface Translations {
   templates: string;
   basic: string;
   deleteDiagram: string;
+  deleteImage: string;
   moreTemplates: string;
   mermaidDiagramTemplates: string;
   enterMermaidCode: string;
@@ -441,10 +442,13 @@ export interface Translations {
   workspaceSidebarShow: string;
   workspaceSidebarHide: string;
   workspaceContextNewFile: string;
+  workspaceContextNewFolder: string;
   workspaceContextRename: string;
+  workspaceContextCopyPath: string;
   workspaceContextDelete: string;
   workspaceContextRevealInOs: string;
   workspaceNewFilePrompt: string;
+  workspaceNewFolderPrompt: string;
   workspaceRenamePrompt: string;
   workspaceConfirmDelete: (name: string) => string;
   workspaceEmptyHint: string;

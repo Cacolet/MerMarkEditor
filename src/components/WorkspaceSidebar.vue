@@ -52,6 +52,7 @@ function closeContext() {
 // matching dialog, and run the actual fs op when the user confirms.
 type PendingAction =
   | { kind: 'new-file'; parent: string }
+  | { kind: 'new-folder'; parent: string }
   | { kind: 'rename'; from: string; originalName: string }
   | { kind: 'delete'; path: string; name: string };
 
@@ -68,6 +69,16 @@ async function onContextAction(action: WorkspaceContextAction) {
   if (action === 'new-file') {
     if (node.kind !== 'folder') return;
     pendingAction.value = { kind: 'new-file', parent: node.path };
+    return;
+  }
+  if (action === 'new-folder') {
+    if (node.kind !== 'folder') return;
+    pendingAction.value = { kind: 'new-folder', parent: node.path };
+    return;
+  }
+  if (action === 'copy-path') {
+    try { await navigator.clipboard.writeText(node.path); }
+    catch (e) { console.error('copy path:', e); }
     return;
   }
   if (action === 'rename') {
@@ -92,6 +103,18 @@ async function onConfirmNewFile(name: string) {
     emit('open-file', created);
   } catch (e) {
     console.error('createFile:', e);
+    window.alert(String(e));
+  }
+}
+
+async function onConfirmNewFolder(name: string) {
+  const a = pendingAction.value;
+  if (!a || a.kind !== 'new-folder') return;
+  pendingAction.value = null;
+  try {
+    await ws.createFolder(a.parent, name);
+  } catch (e) {
+    console.error('createFolder:', e);
     window.alert(String(e));
   }
 }
@@ -305,7 +328,7 @@ const hasOpen = computed(() => ws.openWorkspaces.value.length > 0);
       <button
         v-if="hasOpen"
         class="ws-header-btn"
-        :title="t.workspaceQuickSwitcher"
+        v-tooltip="t.workspaceQuickSwitcher"
         @click="emit('open-quick-switcher')"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -318,7 +341,7 @@ const hasOpen = computed(() => ws.openWorkspaces.value.length > 0);
       <button
         v-if="targetWorkspaceForNewFile"
         class="ws-header-btn"
-        :title="t.newFileInWorkspaceTooltip(targetWorkspaceForNewFile.name)"
+        v-tooltip="t.newFileInWorkspaceTooltip(targetWorkspaceForNewFile.name)"
         @click="startNewFileInActiveWorkspace"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -332,7 +355,7 @@ const hasOpen = computed(() => ws.openWorkspaces.value.length > 0);
       <!-- Open folder: adds a workspace. Distinct from "new file" above. -->
       <button
         class="ws-header-btn"
-        :title="t.openFolder"
+        v-tooltip="t.openFolder"
         @click="pickFolder"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -344,7 +367,7 @@ const hasOpen = computed(() => ws.openWorkspaces.value.length > 0);
 
       <button
         class="ws-header-btn"
-        :title="t.workspace"
+        v-tooltip="t.workspace"
         @click="showHeaderMenu = !showHeaderMenu"
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
@@ -367,7 +390,7 @@ const hasOpen = computed(() => ws.openWorkspaces.value.length > 0);
             v-for="r in ws.recentWorkspaces.value"
             :key="r"
             class="ws-menu-item recent"
-            :title="r"
+            v-tooltip="r"
             @click="openRecent(r)"
           >
             {{ r.split(/[\/\\]/).filter(Boolean).slice(-1)[0] || r }}
@@ -411,7 +434,7 @@ const hasOpen = computed(() => ws.openWorkspaces.value.length > 0);
         <button
           class="ws-add-btn"
           @click="pickFolder"
-          :title="t.openFolder"
+          v-tooltip="t.openFolder"
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
             <line x1="12" y1="5" x2="12" y2="19"/>
@@ -448,6 +471,19 @@ const hasOpen = computed(() => ws.openWorkspaces.value.length > 0);
       :validate="validateNewFileName"
       :select-basename="true"
       @confirm="onConfirmNewFile"
+      @cancel="dismissDialog"
+    />
+
+    <WorkspaceInputDialog
+      v-if="pendingAction?.kind === 'new-folder'"
+      :title="t.workspaceContextNewFolder"
+      :label="t.workspaceNewFolderPrompt"
+      initial-value="folder"
+      :placeholder="'folder'"
+      :confirm-label="t.create"
+      :cancel-label="t.cancel"
+      :validate="validateNewFileName"
+      @confirm="onConfirmNewFolder"
       @cancel="dismissDialog"
     />
 

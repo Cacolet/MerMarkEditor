@@ -52,6 +52,8 @@ import { useRecentFiles } from './composables/useRecentFiles';
 import { useWorkspace } from './composables/useWorkspace';
 import { useAiMermaidTarget } from './composables/useAiMermaidTarget';
 import { useDocumentSearch, type DocumentSearchMatch, type VisualSearchMatch } from './composables/useDocumentSearch';
+import { useImageDrop } from './composables/useImageDrop';
+import { isImageFile } from './utils/image-file-utils';
 import { t } from './i18n';
 
 // ============ Split View & Tab Management ============
@@ -498,6 +500,15 @@ const getCodeTextarea = (): HTMLTextAreaElement | null => {
   return (codeEditorComponentRef.value?.textarea as HTMLTextAreaElement | null | undefined) ?? null;
 };
 
+// ============ Image Drag & Drop ============
+const { handleDrop: handleImageDrop } = useImageDrop({
+  codeView,
+  codeEditorTextarea: getCodeTextarea,
+  activeFilePath: () => activeTab.value?.filePath ?? null,
+  findVisualTargetAt: (x, y) => splitContainerRef.value?.findVisualTargetAt?.(x, y) ?? null,
+  onImagesImported: () => { void workspace.refreshAll(); },
+});
+
 const scrollCodeMatchIntoView = (textarea: HTMLTextAreaElement, match: DocumentSearchMatch) => {
   const computedStyle = window.getComputedStyle(textarea);
   const fontSize = parseFloat(computedStyle.fontSize) || 14;
@@ -875,6 +886,17 @@ const handleWorkspaceOpenFile = (path: string) => {
 
 const handleWorkspaceDropFile = (paneId: string, path: string) => {
   splitState.value.activePaneId = paneId;
+  if (isImageFile(path)) {
+    // Center of pane is good enough — exact position from this event isn't tracked.
+    const paneEl = document.querySelector<HTMLElement>(`.editor-pane.active`)
+      ?? document.querySelector<HTMLElement>('.editor-pane');
+    const rect = paneEl?.getBoundingClientRect();
+    const x = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
+    const y = rect ? rect.top + rect.height / 2 : window.innerHeight / 2;
+    const dpr = window.devicePixelRatio || 1;
+    void handleImageDrop([path], { x: x * dpr, y: y * dpr });
+    return;
+  }
   // eslint-disable-next-line @typescript-eslint/no-use-before-define
   openFileWithCrossWindowCheck(path).catch((e) => console.error('[App] drop file in pane:', e));
 };
@@ -1359,13 +1381,22 @@ onMounted(async () => {
     unlistenDragLeave = await listen('tauri://drag-leave', () => {
       isDragOver.value = false;
     });
-    unlistenDragDrop = await listen<{ paths: string[] }>('tauri://drag-drop', async (event) => {
-      isDragOver.value = false;
-      const mdPaths = event.payload.paths.filter(p => p.toLowerCase().endsWith('.md'));
-      for (const filePath of mdPaths) {
-        await openFileWithCrossWindowCheck(filePath);
-      }
-    });
+    unlistenDragDrop = await listen<{ paths: string[]; position: { x: number; y: number } }>(
+      'tauri://drag-drop',
+      async (event) => {
+        isDragOver.value = false;
+        const { paths, position } = event.payload;
+
+        const mdPaths = paths.filter(p => p.toLowerCase().endsWith('.md'));
+        for (const filePath of mdPaths) {
+          await openFileWithCrossWindowCheck(filePath);
+        }
+
+        if (position) {
+          await handleImageDrop(paths, position);
+        }
+      },
+    );
   } catch (error) {
     console.error('Błąd nasłuchiwania drag-drop:', error);
   }
